@@ -2,18 +2,38 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <sys/inotify.h>
+#include <string.h>
+#include <time.h>
+#include <assert.h>
 
 #define EVENT_SIZE  (sizeof(struct inotify_event))
 #define BUF_LEN     (1024 * (EVENT_SIZE + 16))
 #define TEST 1
+#define UNSAFE 1
+#define COMMAND_LEN 1023*10
 
-void call_command(){
+#define CHECK_TIME(time_val,msg)  {if (time(NULL) - last_print_time > time_val) {\
+  printf("File %s %s.\n", event->name,msg);\
+  last_print_time = time(NULL);\
+}}
 
+#define CHECK_TIME_EXCUTE(time_val,excuter_callBack){\
+  if(time(NULL) - last_print_time > time_val){\
+    last_print_time = time(NULL);\
+    excuter_callBack(cmd_buff);\
+  }\
 }
 
-int monitor_directories(){
+void execute_cmdBuffer(char cmd_buffer[COMMAND_LEN]){
+#if UNSAFE
+  system(cmd_buffer);
+#endif
+}
+
+int monitor_directories(char cmd_buff[COMMAND_LEN]){
   int fd, wd;
   char buffer[BUF_LEN];
+  time_t last_print_time = 0; // Last time a message was printed
 
   fd = inotify_init();
   if (fd < 0) {
@@ -35,26 +55,24 @@ int monitor_directories(){
       exit(EXIT_FAILURE);
     }
 
+    // Reset last_file for each iteration
+
     int i = 0;
     while (i < length) {
       struct inotify_event *event = (struct inotify_event *)&buffer[i];
 
       if (event->len) {
         if (event->mask & IN_CREATE) {
-#if TEST
-          printf("File %s created.\n", event->name);
-#endif
+          //CHECK_TIME(0.5,"CREATED");
+          CHECK_TIME_EXCUTE(0.5,execute_cmdBuffer);
         }
         if (event->mask & IN_MODIFY) {
-          call_command();
-#if TEST
-          printf("File %s modified.\n", event->name);
-#endif
+          //CHECK_TIME(0.5,"MODIFIED");
+          CHECK_TIME_EXCUTE(0.5,execute_cmdBuffer);
         }
         if (event->mask & IN_DELETE) {
-#if TEST
-          printf("File %s deleted.\n", event->name);
-#endif
+          //CHECK_TIME(0.5,"DELETE");
+          CHECK_TIME_EXCUTE(0.5,execute_cmdBuffer);
         }
       }
       i += EVENT_SIZE + event->len;
@@ -65,17 +83,38 @@ int monitor_directories(){
   close(fd);
 
   return 0;
-
 }
+
+void join_argv(int argc,char** argv,char* cmd_buff){
+  size_t cidx = 0; 
+
+  for(int i = 1;i < argc;i++){
+    for(size_t j = 0;j < strlen(argv[i]);j++){
+      cmd_buff[cidx] = argv[i][j];
+      cidx++;
+    }
+    cmd_buff[cidx] = ' ';
+    cidx++;
+  }
+  
+  assert(cidx + 3 < COMMAND_LEN);
+  cmd_buff[cidx] = '\0';
+}
+
 
 int main(int argc,char* argv[]) {
-  int a = system("ls -a");
-  if(a == -1){
-    perror("Failed");
-    exit(EXIT_FAILURE);
-  }
+  assert(argc > 1);
+
+#if UNSAFE
+  char cmd_buff[COMMAND_LEN];
+#endif
+  
+  join_argv(argc,argv,cmd_buff);
+  
+  monitor_directories(cmd_buff);
   return 0;
 }
+
 
 
 
